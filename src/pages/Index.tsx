@@ -3,13 +3,12 @@ import {
   Activity,
   Bot,
   Briefcase,
-  ChevronDown,
-  ChevronRight,
   Cpu,
   Layers,
   Loader2,
   Plus,
   RefreshCw,
+  Timer,
   Zap,
 } from 'lucide-react';
 import { api, JobResponse, AgentInfo, HealthResponse } from '@/lib/api';
@@ -24,6 +23,8 @@ import { cn } from '@/lib/utils';
 
 type Tab = 'create' | 'jobs' | 'agents';
 
+const AUTO_REFRESH_INTERVAL = 5; // seconds
+
 function StatCard({ icon: Icon, label, value, className }: { icon: any; label: string; value: string | number; className?: string }) {
   return (
     <div className={cn('p-4 rounded-xl border border-border bg-card flex items-center gap-3', className)}>
@@ -35,6 +36,26 @@ function StatCard({ icon: Icon, label, value, className }: { icon: any; label: s
         <p className="text-xs text-muted-foreground mt-1">{label}</p>
       </div>
     </div>
+  );
+}
+
+/** Circular countdown ring */
+function CountdownRing({ seconds, total }: { seconds: number; total: number }) {
+  const r = 9;
+  const circ = 2 * Math.PI * r;
+  const progress = (seconds / total) * circ;
+  return (
+    <svg width="24" height="24" className="-rotate-90">
+      <circle cx="12" cy="12" r={r} fill="none" stroke="hsl(var(--border))" strokeWidth="2" />
+      <circle
+        cx="12" cy="12" r={r}
+        fill="none"
+        stroke="hsl(var(--teal))"
+        strokeWidth="2"
+        strokeDasharray={`${progress} ${circ}`}
+        className="transition-all duration-1000 ease-linear"
+      />
+    </svg>
   );
 }
 
@@ -56,6 +77,12 @@ export default function Index() {
   const [latestJob, setLatestJob] = useState<JobResponse | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Auto-refresh state for Jobs tab
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [countdown, setCountdown] = useState(AUTO_REFRESH_INTERVAL);
+  const activeTabRef = useRef<Tab>('create');
+
   const checkHealth = useCallback(async () => {
     try {
       const h = await api.health();
@@ -66,13 +93,13 @@ export default function Index() {
     }
   }, []);
 
-  const fetchJobs = useCallback(async () => {
-    setLoadingJobs(true);
+  const fetchJobs = useCallback(async (silent = false) => {
+    if (!silent) setLoadingJobs(true);
     try {
       const data = await api.listJobs();
       setJobs(Array.isArray(data) ? data : []);
     } catch { setJobs([]); }
-    finally { setLoadingJobs(false); }
+    finally { if (!silent) setLoadingJobs(false); }
   }, []);
 
   const fetchAgents = useCallback(async () => {
@@ -92,7 +119,47 @@ export default function Index() {
     return () => clearInterval(interval);
   }, []);
 
-  // Poll active job
+  // Keep a ref in sync with activeTab for use inside intervals
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
+  // Auto-polling engine: runs when jobs tab is active AND there are active jobs
+  const hasActiveJobs = jobs.some((j) => ['pending', 'running'].includes(j.status));
+
+  const stopAutoRefresh = useCallback(() => {
+    if (autoRefreshRef.current) { clearInterval(autoRefreshRef.current); autoRefreshRef.current = null; }
+    if (countdownTickRef.current) { clearInterval(countdownTickRef.current); countdownTickRef.current = null; }
+    setCountdown(AUTO_REFRESH_INTERVAL);
+  }, []);
+
+  const startAutoRefresh = useCallback(() => {
+    stopAutoRefresh();
+    setCountdown(AUTO_REFRESH_INTERVAL);
+
+    // Countdown ticker (1 Hz)
+    countdownTickRef.current = setInterval(() => {
+      setCountdown((c) => (c <= 1 ? AUTO_REFRESH_INTERVAL : c - 1));
+    }, 1000);
+
+    // Refresh every N seconds
+    autoRefreshRef.current = setInterval(async () => {
+      if (activeTabRef.current === 'jobs') {
+        await fetchJobs(true); // silent refresh (no spinner)
+        setCountdown(AUTO_REFRESH_INTERVAL);
+      }
+    }, AUTO_REFRESH_INTERVAL * 1000);
+  }, [fetchJobs, stopAutoRefresh]);
+
+  // Start/stop auto-refresh based on tab + active jobs
+  useEffect(() => {
+    if (activeTab === 'jobs' && hasActiveJobs) {
+      startAutoRefresh();
+    } else {
+      stopAutoRefresh();
+    }
+    return stopAutoRefresh;
+  }, [activeTab, hasActiveJobs]);
+
+  // Poll the latest created job for status updates
   useEffect(() => {
     if (pollingRef.current) clearInterval(pollingRef.current);
     if (!latestJob || ['success', 'failed', 'cancelled'].includes(latestJob.status)) return;
@@ -134,14 +201,8 @@ export default function Index() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Health indicator */}
             <div className="flex items-center gap-2 text-xs">
-              <span
-                className={cn(
-                  'w-2 h-2 rounded-full',
-                  healthError ? 'bg-destructive' : 'bg-success animate-pulse-glow'
-                )}
-              />
+              <span className={cn('w-2 h-2 rounded-full', healthError ? 'bg-destructive' : 'bg-success animate-pulse-glow')} />
               <span className={cn('font-mono', healthError ? 'text-destructive' : 'text-success')}>
                 {healthError ? 'Offline' : health?.status ?? 'Checking…'}
               </span>
@@ -153,7 +214,7 @@ export default function Index() {
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-6">
-        {/* Hero banner */}
+        {/* Hero */}
         <div className="mb-6 rounded-2xl border border-teal/20 bg-gradient-to-br from-teal/8 via-transparent to-transparent p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-foreground">
@@ -167,7 +228,7 @@ export default function Index() {
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card text-xs">
               <Zap className="w-3.5 h-3.5 text-teal" />
               <span className="text-muted-foreground">Latest:</span>
-              <span className="font-mono text-foreground">{latestJob.name || latestJob.job_id.slice(0,8)}</span>
+              <span className="font-mono text-foreground">{latestJob.name || latestJob.job_id.slice(0, 8)}</span>
               <StatusBadge status={latestJob.status} />
             </div>
           )}
@@ -226,11 +287,21 @@ export default function Index() {
           {activeTab === 'jobs' && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-foreground">All Jobs</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-semibold text-foreground">All Jobs</h2>
+                  {/* Auto-refresh indicator */}
+                  {hasActiveJobs && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-teal/10 border border-teal/20 text-xs text-teal animate-slide-in">
+                      <CountdownRing seconds={countdown} total={AUTO_REFRESH_INTERVAL} />
+                      <Timer className="w-3 h-3" />
+                      <span className="font-mono tabular-nums">Refreshing in {countdown}s</span>
+                    </div>
+                  )}
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={fetchJobs}
+                  onClick={() => fetchJobs()}
                   disabled={loadingJobs}
                   className="h-8 text-xs text-muted-foreground hover:text-foreground"
                 >
@@ -243,11 +314,7 @@ export default function Index() {
                   <Loader2 className="w-6 h-6 animate-spin text-teal" />
                 </div>
               ) : (
-                <JobsTable
-                  jobs={jobs}
-                  onRefresh={fetchJobs}
-                  onViewLogs={setSelectedJob}
-                />
+                <JobsTable jobs={jobs} onRefresh={() => fetchJobs()} onViewLogs={setSelectedJob} />
               )}
             </div>
           )}
@@ -279,7 +346,6 @@ export default function Index() {
         </div>
       </main>
 
-      {/* Logs modal */}
       <LogsModal job={selectedJob} onClose={() => setSelectedJob(null)} />
     </div>
   );
