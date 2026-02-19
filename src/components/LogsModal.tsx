@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Loader2, X, RefreshCw, Copy, Check } from 'lucide-react';
+import { Loader2, RefreshCw, Copy, Check, X } from 'lucide-react';
 import { api, JobResponse } from '@/lib/api';
-import { StatusBadge } from './StatusBadge';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'hsl(38 85% 50%)',
+  running: 'hsl(210 90% 60%)',
+  success: 'hsl(142 60% 42%)',
+  failed: 'hsl(0 72% 55%)',
+  cancelled: 'hsl(210 15% 45%)',
+};
 
 interface LogsModalProps {
   job: JobResponse | null;
@@ -46,42 +46,101 @@ export function LogsModal({ job, onClose }: LogsModalProps) {
     setTimeout(() => setCopied(false), 1500);
   };
 
+  if (!job) return null;
+
   return (
-    <Dialog open={!!job} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl w-full bg-card border-border">
-        <DialogHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <DialogTitle className="text-base font-semibold">
-                Build Logs — <span className="font-mono text-teal">{job?.name || job?.job_id?.slice(0, 8)}</span>
-              </DialogTitle>
-              <div className="flex items-center gap-2">
-                {job && <StatusBadge status={job.status} />}
-                <span className="font-mono text-xs text-muted-foreground">{job?.job_id}</span>
-              </div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fade-in"
+      style={{ background: 'hsl(220 16% 4% / 0.85)', backdropFilter: 'blur(4px)' }}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="w-full max-w-3xl rounded-xl overflow-hidden animate-slide-in"
+        style={{ background: 'hsl(220 16% 11%)', border: '1px solid hsl(220 13% 20%)' }}
+      >
+        {/* Header */}
+        <div
+          className="flex items-center justify-between px-5 py-4"
+          style={{ borderBottom: '1px solid hsl(220 13% 18%)' }}
+        >
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold" style={{ color: 'hsl(210 20% 90%)' }}>
+                Build Logs —
+              </span>
+              <span className="font-mono text-sm font-semibold" style={{ color: 'hsl(152 100% 50%)' }}>
+                {job.name || job.job_id.slice(0, 8)}
+              </span>
             </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={fetchLogs} disabled={loading}>
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={handleCopy}>
-                {copied ? <Check className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
-              </Button>
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold px-2 py-0.5 rounded-full capitalize"
+                style={{
+                  background: `${STATUS_COLOR[job.status] || 'hsl(210 15% 45%)'}1a`,
+                  color: STATUS_COLOR[job.status] || 'hsl(210 15% 55%)',
+                  border: `1px solid ${STATUS_COLOR[job.status] || 'hsl(210 15% 45%)'}33`,
+                }}
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: STATUS_COLOR[job.status] || 'hsl(210 15% 45%)' }}
+                />
+                {job.status}
+              </span>
+              <span className="font-mono text-xs" style={{ color: 'hsl(210 15% 40%)' }}>
+                {job.job_id}
+              </span>
             </div>
           </div>
-        </DialogHeader>
 
-        <div className="relative mt-2">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={fetchLogs}
+              disabled={loading}
+              className="w-8 h-8 rounded-md flex items-center justify-center transition-all hover:bg-white/8"
+              style={{ color: 'hsl(210 15% 50%)' }}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={handleCopy}
+              className="w-8 h-8 rounded-md flex items-center justify-center transition-all hover:bg-white/8"
+              style={{ color: copied ? 'hsl(142 60% 42%)' : 'hsl(210 15% 50%)' }}
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-md flex items-center justify-center transition-all hover:bg-white/8"
+              style={{ color: 'hsl(210 15% 50%)' }}
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Logs */}
+        <div className="relative">
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-card/80 rounded-lg z-10">
-              <Loader2 className="w-5 h-5 animate-spin text-teal" />
+            <div
+              className="absolute inset-0 flex items-center justify-center z-10 rounded-b-xl"
+              style={{ background: 'hsl(220 16% 11% / 0.8)' }}
+            >
+              <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'hsl(152 100% 50%)' }} />
             </div>
           )}
-          <pre className="font-mono text-xs bg-background border border-border rounded-lg p-4 overflow-auto max-h-96 text-foreground/80 leading-relaxed whitespace-pre-wrap">
+          <pre
+            className="font-mono text-xs p-5 overflow-auto leading-relaxed whitespace-pre-wrap"
+            style={{
+              maxHeight: '440px',
+              color: 'hsl(210 15% 65%)',
+              background: 'hsl(220 18% 8%)',
+            }}
+          >
             {logs || '…'}
           </pre>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
